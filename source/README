@@ -1,0 +1,15 @@
+===============
+Istalling blitz
+===============
+tar zxvf blitz.tar.gz
+cd blitz
+phpize
+./configure
+make
+make install
+
+=============
+Testing blitz
+=============
+cd tests; // make cd, because all templates are opened from current directory
+TEST_PHP_EXECUTABLE=/usr/local/bin/php php /your-cli-php-dir/run-tests.php ./

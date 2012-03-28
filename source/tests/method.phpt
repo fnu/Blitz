@@ -1,9 +1,14 @@
-<?
+--TEST--
+user-defined methods
+--FILE--
+<?php
 
 class BlitzTemplate extends Blitz {
+    var $titem;
+
     function BlitzTemplate($t) {
         parent::Blitz($t);
-        $this->set(array('x' => 2006));
+        $this->set(array('x' => 2005));
     }
 
     function my_test($p1,$p2,$p3,$p4) {
@@ -17,7 +22,15 @@ class BlitzTemplate extends Blitz {
     }
 }
 
-$T = new BlitzTemplate('ex7A.tpl');
+$T = new BlitzTemplate('method.tpl');
 echo $T->parse();
 
 ?>
+--EXPECT--
+calling template with arguments: user method called (blitztemplate,12)
+parameters are:
+1:134
+2:2005
+3:'hello,world!'
+4:NULL
+
