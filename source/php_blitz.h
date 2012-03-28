@@ -1,10 +1,13 @@
 /*
   +----------------------------------------------------------------------+
-  | Authors: Alexey Rybak <raa@phpclub.net>                              |
+  | Authors: Alexey Rybak <alexey.rybak@gmail.com>,                      |
+  |          blitz project home is http://alexeyrybak.com/blitz/.        |
+  |          Template analyzing is based on php_templates code by        |
+  |          Maxim Poltarak (http://php-templates.sf.net)                |
   +----------------------------------------------------------------------+
 */
 
-/* $Id: php_blitz.h,v 0.12 2006/11/20 06:02:21 fisher Exp $ */
+/* $Id: php_blitz.h,v 0.14 2006/12/11 07:28:11 fisher Exp $ */
 
 #ifndef PHP_BLITZ_H
 #define PHP_BLITZ_H
@@ -46,9 +49,6 @@ PHP_FUNCTION(blitz_context);
 PHP_FUNCTION(blitz_block);
 PHP_FUNCTION(blitz_fetch);
 
-
-
-
 // class BlitzPack
 PHP_FUNCTION(blitz_pack_init);
 PHP_FUNCTION(blitz_pack_add);
@@ -79,6 +79,7 @@ ZEND_END_MODULE_GLOBALS(blitz)
 #define BLITZ_ARG_TYPE_VAR		1
 #define BLITZ_ARG_TYPE_STR      2
 #define BLITZ_ARG_TYPE_NUM      4
+#define BLITZ_ARG_TYPE_BOOL     8
 
 #define BLITZ_TAG_VAR_PREFIX    		'$'
 #define BLITZ_TAG_VAR_PREFIX_S  		"$"
@@ -317,6 +318,8 @@ typedef struct _blitz_tpl {
         } else {                                                                                  \
             res = 0;                                                                              \
         }                                                                                         \
+    } else if((a).type & BLITZ_ARG_TYPE_BOOL) {                                                   \
+        res = ('t' == *((a).name)) ? 1 : 0;                                                       \
     } else {                                                                                      \
         res = 0;                                                                                  \
     }
