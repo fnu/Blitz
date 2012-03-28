@@ -2,7 +2,7 @@
 <html>
 
 <h1>Blitz Templates</h1>
-<i>$Id: blitz_ru.html,v 1.1 2005/09/18 19:42:10 fisher Exp $, raa sorry-no-spam phpclub d0t net</i><br><br>
+<i>$Id: blitz_ru.html,v 0.3 2005/10/02 18:38:09 fisher Exp $, raa sorry-no-spam phpclub d0t net</i><br><br>
 
 <b>Содержание</b><br>
 <a href="#why">Зачем ещё один парсер шаблонов?</a><br>
@@ -177,13 +177,14 @@ bash> tar zxvf blitz.tar.gz
 bash> cd blitz
 bash> phpize
 bash> make
+bash> ./configure
 bash> make install
 </pre>
 После этого вы, возможно, захотите отредактировать свой php.ini, включив blitz в список расширений:<br>
 extension=blitz.so
 
-<p>Сборка blitz тестировалась на нескольких *nux-платформах, и пока случаев, чтобы 
-были какие-то проблемы при сборке, неизвестно ;) Под windows blitz пока не собирался.
+<p>Сборка blitz тестировалась на Linux 2.6 (i386) и Windows XP. 
+Пользователи Windows могут <a href="/blitz/win32-binaries/">воспользоваться готовыми Win32-бинарниками</a>. 
 
 <a name="intro">
 <h3>Вводный курс</h3>
@@ -482,6 +483,48 @@ include некоторого php-файла, внутри которого бы инициализировалась новая переме
 к уже установленным параметрам шаблона, и уже после этого происходит выполнение кода, 
 поэтому ничего удивительного в таком поведении нет. Эту особенность следует иметь ввиду, 
 чтобы случайно не "затереть" ранее установленную переменную.
+
+<p>Начиная с версии 0.3 в blitz поддерживается передача параметров из шаблона в пользовательский метод:
+<pre>
+Ex.7, file ex7A.tpl:
+calling template with arguments: {{ my_test(134,$x,"hello,world!",$dummy) }}
+Ex.7, file ex7B.php:
+
+&lt;?
+
+class BlitzTemplate extends Blitz {
+    var $titem;
+
+    function BlitzTemplate($t) {
+        parent::Blitz($t);
+        $this->set(array('x' => 1234));
+    }
+
+    function my_test($p1,$p2,$p3,$p4) {
+        $result = 'user method called ('.__CLASS__.','.__LINE__.')'."\n";
+        $result .= 'parameters are:'."\n";
+        $result .= '1:'.var_export($p1,TRUE)."\n";
+        $result .= '2:'.var_export($p2,TRUE)."\n";
+        $result .= '3:'.var_export($p3,TRUE)."\n";
+        $result .= '4:'.var_export($p4,TRUE)."\n";
+        return $result;
+    }
+}
+
+$T = new BlitzTemplate('ex7A.tpl');
+echo $T->parse();
+
+?&gt;
+
+Ex. 7, Output:
+calling template with arguments: user method called (blitztemplate,12)
+parameters are:
+1:134
+2:1234
+3:'hello,world!'
+4:NULL
+
+</pre>
 
 <a name="ini">
 <h3>Параметры настройки</h3>

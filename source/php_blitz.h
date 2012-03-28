@@ -1,12 +1,10 @@
 /*
   +----------------------------------------------------------------------+
-  | Authors: Alexey Rybak <raa@phpclub.net>,                             |
-  |          template analyzing is based on php_templates code by        |
-  |          Maxim Poltarak (http://php-templates.sf.net)                |
+  | Authors: Alexey Rybak <raa@phpclub.net>                              |
   +----------------------------------------------------------------------+
 */
 
-/* $Id: php_blitz.h,v 0.2 2005/09/18 19:45:35 fisher Exp $ */
+/* $Id: php_blitz.h,v 0.3 2005/10/02 18:38:04 fisher Exp $ */
 
 #ifndef PHP_BLITZ_H
 #define PHP_BLITZ_H
@@ -16,12 +14,9 @@ extern zend_module_entry blitz_module_entry;
 
 #ifdef PHP_WIN32
 #define PHP_BLITZ_API __declspec(dllexport)
+#define BLITZ_USE_STREAMS
 #else
 #define PHP_BLITZ_API
-#endif
-
-#if PHP_API_VERSION < 20031224
-#define BLITZ_FOR_PHP_4      1
 #endif
 
 #ifdef ZTS
@@ -83,7 +78,7 @@ ZEND_END_MODULE_GLOBALS(blitz)
 #define BLITZ_TAG_CLOSE_DEFAULT	 "}}"
 
 #define BLITZ_MAX_LEXEM_LEN    		1024
-#define BLITZ_INPUT_BUF_SIZE 	    512
+#define BLITZ_INPUT_BUF_SIZE 	   	512 
 #define BLITZ_ALLOC_TAGS_STEP   	16
 #define BLITZ_CALL_ALLOC_ARG_INIT	2
 
@@ -98,40 +93,40 @@ ZEND_END_MODULE_GLOBALS(blitz)
 
 // call arguments
 typedef struct {
-    uchar *name;
+    char *name;
     ulong len;
-    uchar type;
+    char type;
 } call_arg;
 
 // tags
 typedef struct {
     ulong pos_begin;
     ulong pos_end;
-    uchar type;
-    uchar has_error;
-    uchar *lexem; 
+    char type;
+    char has_error;
+    char *lexem; 
     call_arg *args;
     uchar n_args;
 } tpl_parts_struct;
 
 // config
 typedef struct {
-    uchar *open_tag;
-    uchar *close_tag;
+    char *open_tag;
+    char *close_tag;
     uint l_open_tag;
     uint l_close_tag;
 } tpl_config_struct;
 
 // template
 typedef struct _blitz_tpl {
-    uchar *name;
+    char *name;
     tpl_config_struct *config;
     tpl_parts_struct *tags;
     uint n_tags;
-    uchar *body;
+    char *body;
     ulong body_len;
     HashTable *ht_data;
-    uchar ht_data_is_others;
+    char ht_data_is_others;
     HashTable *ht_tpl_name;
     struct _blitz_tpl **itpl_list;
     uint itpl_list_alloc;
@@ -270,17 +265,5 @@ typedef struct _blitz_tpl {
         (res) = (uchar*)erealloc((res),(alen)*sizeof(uchar));                                     \
         (pres) = (res) + (rlen);                                                                  \
     } 																		                      \
-
-// shm-related
-
-struct blitz_shmop
-{
-        int shmid;
-        key_t key;
-        int shmflg;
-        int shmatflg;
-        char *addr;
-        int size;
-};
 
 #endif	/* PHP_BLITZ_H */

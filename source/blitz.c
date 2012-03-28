@@ -6,32 +6,23 @@
   +----------------------------------------------------------------------+
 */
 
-/* $Id: blitz.c,v 0.2 2005/09/18 19:45:35 fisher Exp $ */
+/* $Id: blitz.c,v 0.3 2005/10/02 18:38:04 fisher Exp $ */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
 #include "php.h"
+#include "safe_mode.h"
+#include "php_globals.h"
 #include "php_ini.h"
+#include "ext/standard/info.h"
 #include "php_blitz.h"
-
-/*
-// shm-related functions
-#ifndef PHP_WIN32
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#else
-#include "tsrm_win32.h"
-#endif
-// for debugs
-#include <sys/time.h>
-*/
 
 ZEND_DECLARE_MODULE_GLOBALS(blitz)
 
 // some declaration - for recursive code
-static int blitz_exec_template(blitz_tpl *tpl, zval *id, uchar **result, ulong *result_len);
+static int blitz_exec_template(blitz_tpl *tpl, zval *id, uchar **result, ulong *result_len TSRMLS_DC);
 
 /* True global resources - no need for thread safety here */
 static int le_blitz;
@@ -51,9 +42,7 @@ function_entry blitz_functions[] = {
 
 /* {{{ blitz_module_entry */
 zend_module_entry blitz_module_entry = {
-#if ZEND_MODULE_API_NO >= 20010901
 	STANDARD_MODULE_HEADER,
-#endif
 	"blitz",
 	blitz_functions,
 	PHP_MINIT(blitz),
@@ -61,9 +50,7 @@ zend_module_entry blitz_module_entry = {
 	PHP_RINIT(blitz),		/* Replace with NULL if there's nothing to do at request start */
 	PHP_RSHUTDOWN(blitz),	/* Replace with NULL if there's nothing to do at request end */
 	PHP_MINFO(blitz),
-#if ZEND_MODULE_API_NO >= 20010901
-	"$Revision: 0.2 $", 
-#endif
+	NO_VERSION_YET,
 	STANDARD_MODULE_PROPERTIES
 };
 /* }}} */
@@ -74,10 +61,11 @@ ZEND_GET_MODULE(blitz)
 
 /* {{{ PHP_INI */
 PHP_INI_BEGIN()
+#if PHP_API_VERSION < 20031224
     STD_PHP_INI_ENTRY("blitz.var_prefix", BLITZ_TAG_VAR_PREFIX_S, PHP_INI_ALL, 
-#ifdef BLITZ_FOR_PHP_4
-		OnUpdateInt, var_prefix, zend_blitz_globals, blitz_globals)
+        OnUpdateInt, var_prefix, zend_blitz_globals, blitz_globals)
 #else
+    STD_PHP_INI_ENTRY("blitz.var_prefix", BLITZ_TAG_VAR_PREFIX_S, PHP_INI_ALL, 
         OnUpdateLong, var_prefix, zend_blitz_globals, blitz_globals)
 #endif
     STD_PHP_INI_ENTRY("blitz.tag_open", BLITZ_TAG_OPEN_DEFAULT, PHP_INI_ALL, 
@@ -87,15 +75,56 @@ PHP_INI_BEGIN()
 PHP_INI_END()
 /* }}} */
 
+
+/* f - filename, b - buf, bl - buf_len, s = stream */
+/* use: BLITZ_READ_TPL_STREAM(filename,buf,buf_len,stream) */
+#define BLITZ_READ_TPL_STREAM(f,b,bl,s)                                             \
+    if(php_check_open_basedir((f) TSRMLS_CC)){                                      \
+        return 0;                                                                   \
+    }                                                                               \
+    (s) = php_stream_open_wrapper((f), "rb",                                        \
+        IGNORE_PATH|IGNORE_URL|IGNORE_URL_WIN|ENFORCE_SAFE_MODE|REPORT_ERRORS, NULL \
+    );                                                                              \
+    if(!(s)) {                                                                      \
+        return 0;                                                                   \
+    }                                                                               \
+    (bl) = php_stream_copy_to_mem((s), &(b), PHP_STREAM_COPY_ALL, 0);               \
+    php_stream_close((s));                                                          \
+
+/* use: BLITZ_READ_TPL_FOPEN(filename,buf,buf_len,f,get_len) */
+#define BLITZ_READ_TPL_FOPEN(f,b,bl,s,gl)											\
+    if(php_check_open_basedir((f) TSRMLS_CC)){                                      \
+        return 0;                                                                   \
+    }																				\
+																					\
+    if(!((s) = fopen((f), "rb"))) {													\
+        php_error_docref(NULL TSRMLS_CC, E_ERROR,									\
+            "unable to open file %s", (f)											\
+        );																			\
+        return 0;																	\
+    }																				\
+																					\
+    (b) = (char*)emalloc(BLITZ_INPUT_BUF_SIZE);										\
+    (bl) = 0;																		\
+																					\
+    while(((gl) = fread((b)+(bl), 1, BLITZ_INPUT_BUF_SIZE, (s))) > 0) {				\
+        (bl) += (gl);																\
+        (b) = (char*)erealloc((b), (bl) + BLITZ_INPUT_BUF_SIZE);					\
+    }																				\
+    fclose((s));																	\
+
 /*  {{{ blitz_init_tpl(char *body, ulong body_len) */
 /******************************************************************************/
 inline blitz_tpl *blitz_init_tpl(
 /******************************************************************************/
-    char *body, 
-    ulong body_len, 
+    char *filename, 
     HashTable *ht TSRMLS_DC) {
 /******************************************************************************/
-    int add_buffer = 0;
+    uint add_buffer = 0;
+    php_stream *stream = NULL;
+    FILE *f = NULL;
+    uint get_len = 0;
+    uint filename_len = 0;
 
     blitz_tpl *tpl = (blitz_tpl*)emalloc(sizeof(blitz_tpl));
 
@@ -123,20 +152,28 @@ inline blitz_tpl *blitz_init_tpl(
 
     tpl->tags = NULL;
 
+/* 
+it seems to be 10% faster to use just fopen/fread than 
+streams on lebowski-bench. however under win32 there are errors 
+with relative paths (see php_blitz.h), i didn't checked why yet ;)
+*/
+#ifdef BLITZ_USE_STREAMS
+    BLITZ_READ_TPL_STREAM(filename,tpl->body,tpl->body_len,stream);
+#else
+    BLITZ_READ_TPL_FOPEN(filename,tpl->body,tpl->body_len,f,get_len);
+#endif
+
     // search algorithm requires lager buffer: body_len + add_buffer
     add_buffer = MAX(tpl->config->l_open_tag,tpl->config->l_close_tag);
-    tpl->body = (char*)ecalloc(body_len+add_buffer,sizeof(char));
+    tpl->body = erealloc(tpl->body,tpl->body_len + add_buffer);
+    memset(tpl->body + tpl->body_len,'\0',add_buffer);
 
-    // 2DO: copying here is not good idea, reading directly 
-    // from file to tpl->body could be much better
-    if (!tpl->body || NULL == memcpy(tpl->body,body,body_len)) {
-        php_error_docref(
-            NULL TSRMLS_CC, E_ERROR,
-            "unable to allocate or fill memory for blitz template body"
-        );
-        return NULL;
+    filename_len = strlen(filename);
+    tpl->name = emalloc((filename_len+1)*sizeof(char));
+    if(tpl->name){
+        memcpy(tpl->name,filename,filename_len);
+        tpl->name[filename_len] = '\0';
     }
-    tpl->body_len = body_len;
 
     if (ht == NULL) { // allocate personal hash-table
         tpl->ht_data = NULL;
@@ -154,11 +191,13 @@ inline blitz_tpl *blitz_init_tpl(
             return NULL;
         }
     } else {
-        // here we "inherit" params from opener: the most correct way to do that
-        // is to follow a "copy-on-write" strategy. unless "inner" code doesn't
-        // modify template params - we use just a pointer-copy. otherwise we
-        // make a full data copy. but here we just make a copy and mark template with 
-        // ht_data_is_others = 1 not to free this object.
+        /* 
+           We "inherit" params from opener: the most correct way to do that
+           is to follow a "copy-on-write" strategy. unless "inner" code doesn't
+           modify template params - we use just a pointer-copy. otherwise we
+           make a full data copy. But to make our life mush easier we just make 
+           a copy and mark template with ht_data_is_others = 1 not to free this object.
+        */
         tpl->ht_data = ht;
         tpl->ht_data_is_others = 1;
     }
@@ -314,7 +353,7 @@ PHP_MINFO_FUNCTION(blitz)
 {
 	php_info_print_table_start();
 	php_info_print_table_row(2, "Blitz support", "enabled");
-	php_info_print_table_row(2, "Revision", "$Revision: 0.2 $");
+	php_info_print_table_row(2, "Revision", "$Revision: 0.3 $");
 	php_info_print_table_end();
 	DISPLAY_INI_ENTRIES();
 }
@@ -343,34 +382,6 @@ static void php_blitz_dump_struct(blitz_tpl *tpl) {
     return;
 }
 
-/*****************************************************************************/
-static void php_blitz_dump_data(HashTable *data) {
-/*****************************************************************************/
-    HashPosition pointer;
-    int array_count;
-    zval **elem;
-    char *key;
-    int key_len = 0;
-    long index = 0;    
-
-    zend_hash_internal_pointer_reset_ex(data, &pointer);
-    php_printf("php_blitz_dump_data:\n");
-    while(zend_hash_get_current_data_ex(data, (void**) &elem, &pointer) == SUCCESS) {
-        if(zend_hash_get_current_key_ex(data, &key, &key_len, &index, 0, &pointer) == HASH_KEY_IS_STRING) {
-            PHPWRITE(key,key_len);
-        } else {
-            php_printf("%ld",key);
-        }
-        php_printf("=><");
-        convert_to_string_ex(elem); 
-        PHPWRITE(Z_STRVAL_PP(elem), Z_STRLEN_PP(elem));
-        php_printf(">\n");
-        zend_hash_move_forward_ex(data, &pointer);
-    }
-
-    return;
-}
-
 # define REALLOC_POS_IF_EXCEEDS                                                 \
     if (i >= alloc_size) {                                              		\
         alloc_size = alloc_size << 1;                                           \
@@ -386,14 +397,14 @@ inline static void blitz_bm_search (
 	uint needle_len,
     uint *n_found,
     ulong **pos, 
-    ulong pos_alloc_size) {
+    ulong pos_alloc_size TSRMLS_DC) {
 /*******************************************************************************/
     register ulong  i=0, j=0, k=0, shift=0, cmp=0;
     register ulong  haystack_len=haystack_length;
     register ulong alloc_size = pos_alloc_size;
     ulong           bmBc[256];
 
-    if(haystack_len < (long)needle_len) {
+    if(haystack_len < (ulong)needle_len) {
         php_error_docref(NULL TSRMLS_CC, E_ERROR, 
             "length of haystack(%d) is less than needle length(%d)\n", haystack_len, needle_len
         );
@@ -444,18 +455,18 @@ inline static void blitz_parse_call (
     uint len_text, 
     tpl_parts_struct *tag, 
     uint *true_lexem_len,
-    uchar *error) {
+    uchar *error TSRMLS_DC) {
 /******************************************************************************/
     uchar *c = text;
     uchar *p = NULL;
     uchar symb = 0, i_symb = 0;
     uchar state = BLITZ_CALL_STATE_ERROR;
     uchar ok = 0;
-    register uint pos, i_pos, i_len;
-    register uchar was_escaped;
+    register uint pos = 0, i_pos = 0, i_len = 0;
+    uchar was_escaped;
     uchar main_token[1024], token[1024];
     uchar n_arg_alloc = 0;
-    uchar i_type = 0;
+    register uchar i_type = 0;
     uchar arg_id = 0;
     call_arg *i_arg = NULL;
 
@@ -465,6 +476,7 @@ inline static void blitz_parse_call (
     tag->lexem = NULL;
 
     *true_lexem_len = 0; // used for parameters only
+
 
     BLITZ_SKIP_BLANK(c,i_pos,pos);
     p = main_token;
@@ -572,6 +584,7 @@ inline static void blitz_parse_call (
         }
     }
 
+
     if(state != BLITZ_CALL_STATE_FINISHED) {
         *error = 1;
     } else if ((tag->type & BLITZ_METHOD_IF) && (tag->n_args<2 || tag->n_args>3)) {
@@ -589,19 +602,18 @@ inline static void blitz_parse_call (
 }
 
 /******************************************************************************/
-inline static int blitz_analyse (blitz_tpl *tpl) {
+inline static int blitz_analyse (blitz_tpl *tpl TSRMLS_DC) {
 /******************************************************************************/
     uint n_open = 0, n_close = 0, n_parts = 0;
-    register uint i = 0, j = 0, k = 0;
+    uint i = 0, j = 0, k = 0;
     ulong *pos_open = NULL;
     ulong *pos_close = NULL;
     ulong *i_pos_open = NULL;
     ulong *i_pos_close = NULL;
-    register ulong current_open = 0, current_close, next_open = 0; 
+    ulong current_open = 0, current_close, next_open = 0; 
 
     uint l_open_tag = tpl->config->l_open_tag;
     uint l_close_tag = tpl->config->l_close_tag;
-    uchar lexem_buf[BLITZ_MAX_LEXEM_LEN];
 	uint lexem_len = 0;
     uint true_lexem_len = 0;
     uint tag_type = 0;
@@ -626,7 +638,7 @@ inline static int blitz_analyse (blitz_tpl *tpl) {
     blitz_bm_search (
 		body, tpl->body_len,
 		tpl->config->open_tag, l_open_tag, 
-		&n_open, &pos_open, pos_open_size
+		&n_open, &pos_open, pos_open_size TSRMLS_CC
 	);
 
     // find close tag positions
@@ -634,7 +646,7 @@ inline static int blitz_analyse (blitz_tpl *tpl) {
     blitz_bm_search (
 		body, tpl->body_len,
 		tpl->config->close_tag, l_close_tag,
-        &n_close, &pos_close, pos_close_size
+        &n_close, &pos_close, pos_close_size TSRMLS_CC
 	);
 
     // allocate memory for tags
@@ -683,7 +695,7 @@ inline static int blitz_analyse (blitz_tpl *tpl) {
                 plex = tpl->body + shift;
                 j = lexem_len;
                 true_lexem_len = 0;
-                blitz_parse_call(plex,j,&tpl->tags[n_parts],&true_lexem_len,&i_error);
+                blitz_parse_call(plex,j,&tpl->tags[n_parts],&true_lexem_len,&i_error TSRMLS_CC);
                 if (i_error) {
                     tpl->tags[n_parts].has_error = 1;
                     php_error_docref(NULL TSRMLS_CC, E_WARNING, 
@@ -733,9 +745,9 @@ inline static int blitz_exec_predefined_method (
     uchar **result,
     uchar **p_result,
     ulong *result_len,
-    ulong *result_alloc_len) {
+    ulong *result_alloc_len TSRMLS_DC) {
 /*****************************************************************************/
-    zval *retval = NULL, *z_method = NULL;
+    zval *retval = NULL, *z_method = NULL, **z = NULL;
     uint method_res = 0;
     ulong buf_len = 0, new_len = 0;
     MAKE_STD_ZVAL(retval);
@@ -755,19 +767,20 @@ inline static int blitz_exec_predefined_method (
 		}
 
 		if(tag->args[i_arg].type & BLITZ_ARG_TYPE_VAR) { // argument is parameter
-			zval **z;
 			if (SUCCESS == zend_hash_find(ht_data,tag->args[i_arg].name,1+tag->args[i_arg].len,(void**)&z)) {
                 convert_to_string_ex(z);
 				buf_len = Z_STRLEN_PP(z);
 				BLITZ_REALLOC_RESULT(buf_len,new_len,*result_len,*result_alloc_len,*result,*p_result);
-				*p_result = (char*)mempcpy(*p_result,Z_STRVAL_PP(z),buf_len);
+				*p_result = (char*)memcpy(*p_result,Z_STRVAL_PP(z),buf_len);
 				*result_len += buf_len;
+				p_result+=*result_len;
 			}
 		} else { // argument is string or number
 			buf_len = tag->args[i_arg].len;
 			BLITZ_REALLOC_RESULT(buf_len,new_len,*result_len,*result_alloc_len,*result,*p_result);
-			*p_result = (char*)mempcpy(*p_result,tag->args[i_arg].name,buf_len);
+			*p_result = (char*)memcpy(*p_result,tag->args[i_arg].name,buf_len);
 			*result_len += buf_len;
+			p_result+=*result_len;
 		}
 	} else if (tag->type & BLITZ_METHOD_INCLUDE) {
         /* this strategy is not optimized for those cases when a complex template 
@@ -783,68 +796,24 @@ inline static int blitz_exec_predefined_method (
         int get_len = 0;
         blitz_tpl *tpl = NULL;
 
-		if((PG(safe_mode)
-			&& !php_checkuid(filename, NULL, CHECKUID_CHECK_FILE_AND_DIR))
-			|| php_check_open_basedir(filename TSRMLS_CC))
-		{
-			return 0;
-		}
-/*
-		stream = php_stream_open_wrapper(
-            filename, "rb", IGNORE_PATH|ENFORCE_SAFE_MODE|REPORT_ERRORS, NULL
-        );
-		if(!stream) { 
-			return 0;
-		}
-
-		buf_len = php_stream_copy_to_mem(stream, &buf, PHP_STREAM_COPY_ALL, 0);
-		php_stream_close(stream);
-*/
-
-        if(!(filename && (f = fopen(filename, "rb")))) {
-            php_error_docref(NULL TSRMLS_CC, E_ERROR,
-                "unable to open file %s", filename
-            );
-            return 0;
-        }
-
-		// read template: probably the fastest way for many small files
-		// 2DO: try "manual" fstat+mmap here (not through php_streams)
-		buf = (char*)emalloc((BLITZ_INPUT_BUF_SIZE)*sizeof(char));
-		buf_len = 0;
-		while((get_len = fread(buf+buf_len, sizeof(char), BLITZ_INPUT_BUF_SIZE, f)) > 0) {
-			buf_len += get_len;
-			buf = (char*)erealloc(buf, (buf_len + BLITZ_INPUT_BUF_SIZE)*sizeof(char));
-		}
-		fclose(f);
-        if(buf_len) buf[buf_len-1] = '\0';
-
 		/* initialize template */
-		if(!(tpl = blitz_init_tpl(buf, buf_len, ht_data TSRMLS_CC))) {
+		if(!(tpl = blitz_init_tpl(filename, ht_data TSRMLS_CC))) {
 			blitz_free_tpl(tpl);    
-			efree(buf);
 			return 0;
 		}
-
-        tpl->name = emalloc((filename_len+1)*sizeof(char));
-        if(tpl->name){
-            memcpy(tpl->name,filename,filename_len);
-            tpl->name[filename_len] = '\0';
-        }
 
 		/* analyze template */
-		if(!blitz_analyse(tpl)) {
+		if(!blitz_analyse(tpl TSRMLS_CC)) {
 			blitz_free_tpl(tpl);
-			efree(buf);
 			return 0;
 		}
-		efree(buf);
 
         // parse
-        if(blitz_exec_template(tpl,id,&inner_result,&inner_result_len)) {
+        if(blitz_exec_template(tpl,id,&inner_result,&inner_result_len TSRMLS_CC)) {
             BLITZ_REALLOC_RESULT(inner_result_len,new_len,*result_len,*result_alloc_len,*result,*p_result);
-            *p_result = (char*)mempcpy(*p_result,inner_result,inner_result_len);
+            *p_result = (char*)memcpy(*p_result,inner_result,inner_result_len);
             *result_len += inner_result_len;
+			p_result+=*result_len;
         }
         blitz_free_tpl(tpl);
 	} 
@@ -856,37 +825,82 @@ inline static int blitz_exec_predefined_method (
 inline static int blitz_exec_user_method (
 /*****************************************************************************/
     tpl_parts_struct *tag,
+    HashTable *ht_data,
     zval  *obj,
     uchar **result,
     uchar **p_result,
     ulong *result_len,
-    ulong *result_alloc_len) {
+    ulong *result_alloc_len TSRMLS_DC) {
 /*****************************************************************************/
-    zval *retval = NULL, *z_method = NULL;
+    zval *retval = NULL, *z_method = NULL, **z_param = NULL;
     uint method_res = 0;
     ulong buf_len = 0, new_len = 0;
+    zval ***args = NULL;
+    zval **pargs = NULL;
+    uint i = 0;
+    call_arg *i_arg = NULL;
+    char i_arg_type = 0;
+   
     MAKE_STD_ZVAL(retval);
     ZVAL_FALSE(retval);
     MAKE_STD_ZVAL(z_method);
     ZVAL_STRING(z_method,tag->lexem,1);
 
+    // prepare arguments if needed
+    if(tag->n_args>0 && tag->args) {
+        // dirty trick to pass arguments
+        // pargs are zval ** with parameter data
+        // args just point to pargs
+        args = emalloc(tag->n_args*sizeof(zval));
+        pargs = emalloc(tag->n_args*sizeof(zval));
+        for(i=0; i<tag->n_args; i++) {
+            args[i] = NULL;
+            MAKE_STD_ZVAL(pargs[i]);
+            i_arg  = &(tag->args[i]);
+            i_arg_type = i_arg->type;
+            if (i_arg_type == BLITZ_ARG_TYPE_VAR) {
+                // fetch variable and bind to the argument
+				if (SUCCESS == zend_hash_find(ht_data,tag->args[i].name,1+tag->args[i].len,(void**)&z_param)) {
+                    args[i] = z_param;
+				} else {
+                    ZVAL_NULL(pargs[i]);
+                }
+            } else if (i_arg_type == BLITZ_ARG_TYPE_NUM) {
+                ZVAL_LONG(pargs[i],atol(i_arg->name));
+            } else {
+				ZVAL_STRING(pargs[i],i_arg->name,1);
+            }
+            if(!args[i]) args[i] = & pargs[i];
+        }
+    }
+
+	// call object method
     method_res = call_user_function_ex(
         CG(function_table), &obj,
-        z_method, &retval, 0, 0, 1, NULL TSRMLS_CC
+        z_method, &retval, tag->n_args, args, 1, NULL TSRMLS_CC
     );
-
 
     if (method_res != FAILURE) {
         buf_len = Z_STRLEN_P(retval);
         BLITZ_REALLOC_RESULT(buf_len,new_len,*result_len,*result_alloc_len,*result,*p_result);
-        *p_result = (char*)mempcpy(*p_result,Z_STRVAL_P(retval), buf_len);
+        *p_result = (char*)memcpy(*p_result,Z_STRVAL_P(retval), buf_len);
         *result_len += buf_len;
+		p_result+=*result_len;
     }
 
     zval_dtor(z_method);
-    if (retval)
+    if (retval) {
         zval_dtor(retval);
+    }
+	if(pargs) {
+         for(i=0; i<tag->n_args; i++) {
+             zval_dtor(pargs[i]);
+         }
+         efree(args);
+         efree(pargs);
+    }
 
+    return 1;
 }
 
 /*****************************************************************************/
@@ -895,7 +909,7 @@ static int blitz_exec_template (
     blitz_tpl *tpl,
     zval *id,
     uchar **result,
-    ulong *result_len) {
+    ulong *result_len TSRMLS_DC) {
 /*****************************************************************************/
     zval **desc = NULL;
     uint i = 0, j = 0;
@@ -910,19 +924,16 @@ static int blitz_exec_template (
     if(0 == tpl->n_tags) {
         *result = tpl->body; // won't copy
         *result_len += tpl->body_len;
-        return 1;
+        return 2; // will not call efree on result
     }
 
     // build result, initial alloc of twice bigger than body
     *result_len = 0;
     result_alloc_len = 2*tpl->body_len; 
-    //result_alloc_len = 512; 
     *result = (char*)ecalloc(result_alloc_len,sizeof(char));
     if(!*result) {
         return 0;
     }
-
-    TSRMLS_FETCH();
 
     p_result = *result;
     shift = 0;
@@ -938,8 +949,9 @@ static int blitz_exec_template (
         // between tags
         if (buf_len>0) {
             BLITZ_REALLOC_RESULT(buf_len,new_len,*result_len,result_alloc_len,*result,p_result);
-            p_result = (char*)mempcpy(p_result, p_body + last_close, buf_len); 
+            p_result = (char*)memcpy(p_result, p_body + last_close, buf_len); 
 			*result_len += buf_len;
+			p_result+=*result_len;
         }
 
         if (tag->lexem && !tag->has_error) {
@@ -954,18 +966,19 @@ static int blitz_exec_template (
                     convert_to_string_ex(zparam);
 			        buf_len = Z_STRLEN_PP(zparam);
                     BLITZ_REALLOC_RESULT(buf_len,new_len,*result_len,result_alloc_len,*result,p_result);
-	                p_result = (char*)mempcpy(p_result,Z_STRVAL_PP(zparam), buf_len);
+	                p_result = (char*)memcpy(p_result,Z_STRVAL_PP(zparam), buf_len);
 	                *result_len += buf_len;
+					p_result+=*result_len;
 	            }
             }
 			else if (BLITZ_IS_METHOD(tag->type)) {
                 if(BLITZ_IS_PREDEF_METHOD(tag->type)) {
                     blitz_exec_predefined_method(
-                        tag,tpl->ht_data,id,result,&p_result,result_len,&result_alloc_len
+                        tag,tpl->ht_data,id,result,&p_result,result_len,&result_alloc_len TSRMLS_CC
                     );
                 } else {
                     blitz_exec_user_method(
-                        tag,id,result,&p_result,result_len,&result_alloc_len
+                        tag,tpl->ht_data,id,result,&p_result,result_len,&result_alloc_len TSRMLS_CC
                     );
                 }
 			}
@@ -976,8 +989,9 @@ static int blitz_exec_template (
     buf_len = tpl->body_len - last_close;
     if(buf_len>0) {
         BLITZ_REALLOC_RESULT(buf_len,new_len,*result_len,result_alloc_len,*result,p_result);
-        p_result = (char*)mempcpy(p_result, tpl->body + last_close, buf_len);
+        p_result = (char*)memcpy(p_result, tpl->body + last_close, buf_len);
         *result_len += buf_len;
+		p_result+=*result_len;
     }
 
     return 1;
@@ -992,84 +1006,30 @@ static int blitz_exec_template (
 PHP_FUNCTION(blitz_init) {
 /*****************************************************************************/
     blitz_tpl *tpl = NULL;
-    char *buf = NULL;
-    ulong buf_len = 0;
-    FILE *f = NULL;
     uint filename_len;
     char *filename;
 
-    php_stream *stream;
-    struct blitz_shmop *shmop;
-    key_t k;
-    int shmid;
-    char *shmaddr;
     int get_len = 0;
+    zval *new_object = NULL;
+	int ret = 0;
 
     if(FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,"s",&filename,&filename_len)) {
         WRONG_PARAM_COUNT;
         RETURN_FALSE;
     }
 
-    // check security restrictions
-    if((PG(safe_mode)
-        && !php_checkuid(filename, NULL, CHECKUID_CHECK_FILE_AND_DIR))
-        || php_check_open_basedir(filename TSRMLS_CC))
-    {
-        RETURN_FALSE
-    }
-
-/*
-    stream = php_stream_open_wrapper(filename, "rb", IGNORE_PATH|ENFORCE_SAFE_MODE|REPORT_ERRORS, NULL);
-    if(!stream) { // 2do: log
-        RETURN_FALSE;
-    }
-
-    buf_len = php_stream_copy_to_mem(stream, &buf, PHP_STREAM_COPY_ALL, 0);
-    php_stream_close(stream);
-*/
-
-    if(!(filename && (f = fopen(filename, "rb")))) {
-        php_error_docref(NULL TSRMLS_CC, E_ERROR,
-            "unable to open file %s", filename
-        );        
-		RETURN_FALSE;
-    }
-
-    // read template: probably the fastest way for many small files
-    // 2DO: try "manual" fstat+mmap here (not through php_streams)
-    buf = (char*)emalloc((BLITZ_INPUT_BUF_SIZE)*sizeof(char));
-    buf_len = 0;
-    while((get_len = fread(buf+buf_len, sizeof(char), BLITZ_INPUT_BUF_SIZE, f)) > 0) {
-        buf_len += get_len;
-        buf = (char*)erealloc(buf, (buf_len + BLITZ_INPUT_BUF_SIZE)*sizeof(char));
-    }
-    fclose(f);
-    if(buf_len) buf[buf_len-1] = '\0';
-
     /* initialize template */
-    if(!(tpl = blitz_init_tpl(buf, buf_len, NULL TSRMLS_CC))) {
+    if(!(tpl = blitz_init_tpl(filename, NULL TSRMLS_CC))) {
         blitz_free_tpl(tpl);    
-        efree(buf);
         RETURN_FALSE;
-    }
-
-    tpl->name = emalloc((filename_len+1)*sizeof(char));
-    if(tpl->name){
-        memcpy(tpl->name,filename,filename_len);
-        tpl->name[filename_len] = '\0';
     }
 
     /* analyze template */
-    if(!blitz_analyse(tpl)) {
+    if(!blitz_analyse(tpl TSRMLS_CC)) {
         blitz_free_tpl(tpl);
-        efree(buf);
         RETURN_FALSE;
     }
 
-    efree(buf);
-
-    /* create new object */
-    zval *new_object = NULL;
     MAKE_STD_ZVAL(new_object);
 
     if(object_init(new_object) != SUCCESS)
@@ -1078,7 +1038,7 @@ PHP_FUNCTION(blitz_init) {
         RETURN_FALSE;
     }
 
-    int ret = zend_list_insert(tpl, le_blitz);
+    ret = zend_list_insert(tpl, le_blitz);
 //    object_init_ex(getThis(), &blitz_class_entry);
     add_property_resource(getThis(), "tpl", ret);
     zend_list_addref(ret);
@@ -1107,7 +1067,7 @@ PHP_FUNCTION(blitz_dump_set) {
     }
 
     ZEND_FETCH_RESOURCE(tpl, blitz_tpl *, desc, -1, "Blitz template handle", le_blitz);
-    php_blitz_dump_data(tpl->ht_data);
+//    php_blitz_dump_data(tpl->ht_data);
 
     RETURN_TRUE;
 }
@@ -1121,12 +1081,13 @@ PHP_FUNCTION(blitz_set) {
     zval *id = NULL;
     zval **desc = NULL;
     blitz_tpl *tpl = NULL;
-    zval *input_arr, **elem, **zdummy;
+    zval *input_arr, **elem;
     HashTable *input_ht = NULL;
     HashPosition pointer;
     char *key = NULL;
     int key_len = 0;
     long index = 0;
+    int r = 0;
 
     if ((id = getThis()) == 0) {
         WRONG_PARAM_COUNT;
@@ -1171,7 +1132,7 @@ PHP_FUNCTION(blitz_set) {
                 //convert_to_string_ex(&temp);
                 zval_copy_ctor(temp);
 
-                int r = zend_hash_update(
+                r = zend_hash_update(
                     tpl->ht_data,
                     key,
                     key_len,
@@ -1202,13 +1163,13 @@ PHP_FUNCTION(blitz_parse) {
     zval **zparam = NULL;
     zval *input_arr = NULL;
     tpl_parts_struct *tag = NULL;
-    zval      **src_entry,
-              **dest_entry;
-    char      *string_key;
-    uint      string_key_len;
-    ulong     num_key;
+    zval      **src_entry = NULL;
+    char      *string_key = NULL;
+    uint      string_key_len = 0;
+    ulong     num_key =0;
     HashPosition pos;
     HashTable *input_ht = NULL;
+	char exec_status = 0;
 
     if ((id = getThis()) == 0) {
         WRONG_PARAM_COUNT;
@@ -1233,6 +1194,7 @@ PHP_FUNCTION(blitz_parse) {
     }
 
     // merge data: input array => template parameters
+
     if(input_arr) {
 		input_ht = Z_ARRVAL_P(input_arr);
 		zend_hash_internal_pointer_reset_ex(input_ht, &pos);
@@ -1249,11 +1211,11 @@ PHP_FUNCTION(blitz_parse) {
     }
 
     // execute call
-    char exec_status = blitz_exec_template(tpl,id,&result,&result_len);
+    exec_status = blitz_exec_template(tpl,id,&result,&result_len TSRMLS_CC);
 
     if(exec_status) {
         ZVAL_STRINGL(return_value,result,result_len,1);
-        efree(result);
+        if(exec_status == 1) efree(result);
     } else {
         ZVAL_STRINGL(return_value,"",0,1);
     }
@@ -1266,8 +1228,6 @@ PHP_FUNCTION(blitz_parse) {
 PHP_FUNCTION(blitz_include) {
 /*****************************************************************************/
     blitz_tpl *tpl = NULL, *itpl = NULL;
-    char *buf = NULL;
-    ulong buf_len = 0;
     FILE *f = NULL;
     uint filename_len = 0, get_len = 0;
     char *filename = NULL;
@@ -1276,13 +1236,16 @@ PHP_FUNCTION(blitz_include) {
     uchar *result = NULL;
     ulong result_len = 0;
     zval *input_arr = NULL;
-    zval      **src_entry,
-              **dest_entry;
-    char      *string_key;
-    uint      string_key_len;
-    ulong     num_key;
+    zval      **src_entry = NULL,
+              **dest_entry = NULL;
+    char      *string_key = NULL;
+    uint      string_key_len = 0;
+    ulong     num_key = 0;
     HashPosition pos;
     HashTable *input_ht = NULL;
+	ulong itpl_idx = 0;
+    zval *temp = NULL;
+    php_stream *stream = NULL;
 
     if ((id = getThis()) == 0) {
         WRONG_PARAM_COUNT;
@@ -1312,46 +1275,17 @@ PHP_FUNCTION(blitz_include) {
     if(SUCCESS == zend_hash_find(tpl->ht_tpl_name,filename,filename_len,(void **)&desc)) {
         itpl = tpl->itpl_list[Z_LVAL_PP(desc)];
     } else { // read and init template
-		// check security restrictions
-		if((PG(safe_mode)
-			&& !php_checkuid(filename, NULL, CHECKUID_CHECK_FILE_AND_DIR))
-			|| php_check_open_basedir(filename TSRMLS_CC))
-		{
-			RETURN_FALSE
-		}
-
-        if(!(f = fopen(filename, "rb"))) {
-	    	RETURN_FALSE;
-        }
-        buf = (char*)emalloc((BLITZ_INPUT_BUF_SIZE)*sizeof(char)); 
-        buf_len = 0;
-        while((get_len = fread(buf+buf_len, sizeof(char), BLITZ_INPUT_BUF_SIZE, f)) > 0) {
-            buf_len += get_len;
-            buf = (char*)erealloc(buf, (buf_len + BLITZ_INPUT_BUF_SIZE)*sizeof(char));
-        }
-        fclose(f);
-        if(buf_len) buf[buf_len-1] = '\0';
-
         /* initialize template */
-        if(!(itpl = blitz_init_tpl(buf, buf_len, tpl->ht_data TSRMLS_CC))) {
+        if(!(itpl = blitz_init_tpl(filename, tpl->ht_data TSRMLS_CC))) {
             blitz_free_tpl(itpl);    
-            efree(buf);
             RETURN_FALSE;
-        }
-
-        itpl->name = emalloc((filename_len+1)*sizeof(char));
-        if(itpl->name){
-            memcpy(itpl->name,filename,filename_len);
-            itpl->name[filename_len] = '\0';
         }
 
         /* analyze template */
-        if(!blitz_analyse(itpl)) {
+        if(!blitz_analyse(itpl TSRMLS_CC)) {
             blitz_free_tpl(itpl);
-            efree(buf);
             RETURN_FALSE;
         }
-        efree(buf);
 
         // realloc list if needed
         if (tpl->itpl_list_len >= tpl->itpl_list_alloc-1) {
@@ -1365,15 +1299,13 @@ PHP_FUNCTION(blitz_include) {
                     "cannot  realloc memory for inner-template list"
                 );
                 blitz_free_tpl(itpl);
-                efree(buf);
                 RETURN_FALSE;
             }
         }
 
         // save template index values
-        ulong itpl_idx = tpl->itpl_list_len;
+        itpl_idx = tpl->itpl_list_len;
         tpl->itpl_list[itpl_idx] = itpl;
-        zval *temp;
         MAKE_STD_ZVAL(temp);
         ZVAL_LONG(temp, itpl_idx);
         zend_hash_update(tpl->ht_tpl_name, filename, filename_len,
@@ -1398,7 +1330,7 @@ PHP_FUNCTION(blitz_include) {
     }
 
     // execute call
-    if(blitz_exec_template(itpl,id,&result,&result_len)) {
+    if(blitz_exec_template(itpl,id,&result,&result_len TSRMLS_CC)) {
         // return
         ZVAL_STRINGL(return_value,result,result_len,1);
         efree(result);
