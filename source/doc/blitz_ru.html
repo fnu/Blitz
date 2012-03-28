@@ -2,8 +2,11 @@
 <html>
 
 <h1>Blitz Templates</h1>
-<i>$Id: blitz_ru.html,v 0.5 2006/09/24 18:13:32 fisher Exp $, raa sorry-no-spam phpclub d0t net</i><br><br>
+<i>$Id: blitz_ru.html,v 0.7 2006/10/15 18:08:57 fisher Exp $, raa sorry-no-spam phpclub d0t net</i><br><br>
 
+<a href="http://fisher.phpclub.net/blitz/">download the source and win32 binaries</a>
+
+<p>
 <b>Содержание</b><br>
 <a href="#why">Зачем ещё один парсер шаблонов?</a><br>
 <a href="#bench">Некоторые результаты тестов производительности</a><br>
@@ -153,7 +156,7 @@ N         Engine name          Time           Percentage
 ab -n20000 -c100, ZPS on
 ################################
 ugly php mess:         1150
-clitz ctx arrays:      890
+blitz ctx arrays:      890
 blitz ctx:             825
 php includes:          770
 blitzpack:             725
@@ -164,8 +167,8 @@ php_templates:         615
 ab -n20000 -c100, ZPS off
 ################################
 ugly php mess:         660
-clitz ctx arrays:      590
-clitz ctx:             560
+blitz ctx arrays:      590
+blitz ctx:             560
 php_templates:         450
 blitzpack:             440
 blitz includes:        430
@@ -789,8 +792,7 @@ Ex. 10, Output:
 <p>Наконец, можно использовать метод load, чтобы загрузить тело шаблона из обычной php-переменной:
 <pre>
 ex11A.php:
-<pre>
-$body = <<<BODY
+$body = &lt;&lt;&lt;BODY
 hello, {{ \$who }}!
 {{ bye; }}
 
@@ -805,11 +807,12 @@ class View extends Blitz {
 $T = new View();
 $T->load($body);
 echo $T->parse(array('who' => 'world'));
-</pre>
+
 Ex. 11, Output:
 hello, world!
 Have a lot of fun!...
 </pre>
+
 
 
 <a name="ini">

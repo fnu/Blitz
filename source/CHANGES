@@ -1,4 +1,11 @@
 ===============================================================================
+0.4.2.version
+===============================================================================
+- bugfix #3: occasionally uninitialized pargs element in user method call 
+- bugfix #7: occasionally uninitialized parent_ctx_data in blitz_exec_nodes 
+- fetch: cleans-up latest iteration automatically
+
+===============================================================================
 0.4.1 version
 ===============================================================================
 - several context/iterate fixes (logical, very important Dick's issues)

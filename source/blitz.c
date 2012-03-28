@@ -6,7 +6,7 @@
   +----------------------------------------------------------------------+
 */
 
-/* $Id: blitz.c,v 0.18 2006/11/20 06:02:21 fisher Exp $ */
+/* $Id: blitz.c,v 0.21 2006/11/27 16:48:51 fisher Exp $ */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -204,15 +204,16 @@ blitz_tpl *blitz_init_tpl_base(HashTable *ht TSRMLS_DC){
     MAKE_STD_ZVAL(empty_array);
     array_init(empty_array);
     add_next_index_zval(tpl->iterations, empty_array);
-/*
+
+/* ? */
     zend_hash_get_current_data(Z_ARRVAL_P(tpl->iterations), (void **) &tpl->current_iteration);
     zend_hash_get_current_data(Z_ARRVAL_P(tpl->iterations), (void **) &tpl->last_iteration);
-php_printf("%p %p\n", tpl->current_iteration, tpl->last_iteration);
-//    tpl->last_iteration = tpl->current_iteration;
-*/
+/* ? */
 
+/*
     tpl->current_iteration = NULL;
     tpl->last_iteration = NULL;
+*/
 
     tpl->current_iteration_parent = & tpl->iterations;
     tpl->current_path = "/";
@@ -653,7 +654,7 @@ PHP_MINFO_FUNCTION(blitz)
 {
     php_info_print_table_start();
     php_info_print_table_row(2, "Blitz support", "enabled");
-    php_info_print_table_row(2, "Version", "0.4.1");
+    php_info_print_table_row(2, "Version", "0.4.2");
     php_info_print_table_end();
     DISPLAY_INI_ENTRIES();
 }
@@ -1889,7 +1890,8 @@ inline static int blitz_exec_user_method (
         pargs = emalloc(node->n_args*sizeof(zval));
         for(i=0; i<node->n_args; i++) {
             args[i] = NULL;
-            MAKE_STD_ZVAL(pargs[i]);
+            ALLOC_INIT_ZVAL(pargs[i]);
+            ZVAL_NULL(pargs[i]);
             i_arg  = &(node->args[i]);
             i_arg_type = i_arg->type;
             if (i_arg_type == BLITZ_ARG_TYPE_VAR) {
@@ -1898,8 +1900,6 @@ inline static int blitz_exec_user_method (
                     || (SUCCESS == zend_hash_find(hash_globals,node->args[i].name,1+node->args[i].len,(void**)&z_param)))
                 {
                     args[i] = z_param;
-                } else {
-                    ZVAL_NULL(pargs[i]);
                 }
             } else if (i_arg_type == BLITZ_ARG_TYPE_NUM) {
                 ZVAL_LONG(pargs[i],atol(i_arg->name));
@@ -1963,7 +1963,7 @@ static int blitz_exec_nodes (
 
     // check parent data (once in the beginning) - user could put non-array here. 
     // if we use hash_find on non-array - we get segfaults.
-    if(Z_TYPE_P(parent_ctx_data) == IS_ARRAY) {
+    if(parent_ctx_data && Z_TYPE_P(parent_ctx_data) == IS_ARRAY) {
         parent_params = parent_ctx_data;
     }
 
@@ -1978,6 +1978,8 @@ static int blitz_exec_nodes (
     i_max = tpl->n_nodes;
     
 //php_printf("i_max:%ld, n_nodes = %ld\n",i_max,n_nodes);
+//if(parent_ctx_data) php_var_dump(&parent_ctx_data, 0);
+//if(parent_params) php_var_dump(&parent_params, 0);
 
     for(; i<i_max && i_processed<n_nodes; ++i) {
         node = nodes + i;
@@ -1996,9 +1998,6 @@ static int blitz_exec_nodes (
             *result_len += buf_len;
             p_result+=*result_len;
         }
-
-//php_var_dump(&parent_ctx_data, 0);
-//if(parent_params) php_var_dump(&parent_params, 0);
 
         if (node->lexem && !node->has_error) {
             if (BLITZ_IS_VAR(node->type)) {  // search: in current context, then in global params
@@ -2251,6 +2250,8 @@ inline int blitz_iterate_by_path(
     int res = 0;
     k = pmax - 1;
     tmp = &tpl->iterations;
+    HashPosition pointer;
+    long index = 0;
 
 //php_printf("%p %p\n", tpl->current_iteration, tpl->last_iteration);
 //if(tpl->current_iteration) php_var_dump(tpl->current_iteration,1);
@@ -2263,6 +2264,7 @@ inline int blitz_iterate_by_path(
             zval *empty_array;
             MAKE_STD_ZVAL(empty_array);
             array_init(empty_array);
+
             add_next_index_zval(*tmp, empty_array);
             zend_hash_internal_pointer_end(Z_ARRVAL_PP(tmp));
         }
@@ -2375,12 +2377,14 @@ inline int blitz_iterate_by_path(
     }
 
     /* logic: 
-        new iteration can be created while propagating through the path - then created inside upper loop and found set to 0.
-        new iteration can be created if not found while propagating through the path and called from block or iterate - then create_new=1 is used
-        new iteration will not be created if called from set, not found while propagating through the path - then create_new=0 is used
+        - new iteration can be created while propagating through the path - then created inside upper loop and found set to 0.
+        - new iteration can be created if not found while propagating through the path and called from block or iterate - then create_new=1 is used
+        - new iteration will not be created if called from set, not found while propagating through the path - then create_new=0 is used.
+          but when we used fetch and then set to the same context - it is cleaned, and there are no iterations at all.
+          so, in this particular case we create an empty iteration
     */
 
-    if(found && create_new) {
+    if(found && (create_new || 0 == zend_hash_num_elements(Z_ARRVAL_PP(tmp)))) {
         zval *empty_array;
         MAKE_STD_ZVAL(empty_array);
         array_init(empty_array);
@@ -2394,26 +2398,26 @@ inline int blitz_iterate_by_path(
         }
     }
 
-//php_printf("%p %p\n", tpl->current_iteration, tpl->last_iteration);
-//if(tpl->current_iteration) php_var_dump(tpl->current_iteration,1);
-
-    zend_hash_get_current_data(Z_ARRVAL_PP(tmp), (void **) &tpl->last_iteration);
-
-//php_printf("%p %p\n", tpl->current_iteration, tpl->last_iteration);
-//if(tpl->current_iteration) php_var_dump(tpl->current_iteration,1);
-
-    if(is_current_iteration) {
-        zend_hash_get_current_data(Z_ARRVAL_PP(tmp), (void **) &tpl->current_iteration);
+    if(SUCCESS != zend_hash_get_current_data(Z_ARRVAL_PP(tmp), (void **) &tpl->last_iteration)) {
+        php_error_docref(NULL TSRMLS_CC, E_WARNING, "INTERNAL: unable fetch last_iteration in blitz_iterate_by_path");
+        tpl->last_iteration = NULL;
     }
 
-//if(tpl->current_iteration) php_var_dump(tpl->current_iteration,1);
+    if(is_current_iteration) {
+        tpl->current_iteration = tpl->last_iteration; // was: fetch from tmp
+    }
 
+    if(DEBUG) {
+        php_printf("Iteration pointers: %p %p\n", tpl->current_iteration, tpl->last_iteration);
+        if(tpl->current_iteration) php_var_dump(tpl->current_iteration,1);
+        if(tpl->last_iteration) php_var_dump(tpl->last_iteration,1);
+    }
 
     return 1;
 }
 
 /**********************************************************************************************************************/
-int blitz_find_iteration_by_path(blitz_tpl *tpl, char *path, int path_len, zval **iteration) {
+int blitz_find_iteration_by_path(blitz_tpl *tpl, char *path, int path_len, zval **iteration, zval **iteration_parent) {
 /**********************************************************************************************************************/
     zval **tmp, **entry;
     int i = 1, ilast = 1, j = 0, k = 0;
@@ -2467,15 +2471,26 @@ int blitz_find_iteration_by_path(blitz_tpl *tpl, char *path, int path_len, zval 
         ++i;
     }
 
+    // can be not an array (tried to iterate scalar)
+    if(IS_ARRAY != Z_TYPE_PP(tmp)) {
+        php_error_docref(NULL TSRMLS_CC, E_WARNING, "ERROR: unable to find context '%s', "
+            "it was set as \"scalar\" value - check your iteration params", path); 
+        return 0;
+    }
+
     zend_hash_internal_pointer_end(Z_ARRVAL_PP(tmp));
     if(SUCCESS == zend_hash_get_current_data(Z_ARRVAL_PP(tmp), (void **) &dummy)) {
 //php_printf("%p %p %p %p\n", dummy, *dummy, iteration, *iteration);
         *iteration = *dummy;
+        *iteration_parent = *tmp;
     } else {
         return 0;
     }
 
 //php_printf("%p %p %p %p\n", dummy, *dummy, iteration, *iteration);
+//php_printf("parent:\n");
+//php_var_dump(iteration_parent,0);
+//php_printf("found:\n");
 //php_var_dump(iteration,0);
 
     return 1;
@@ -2581,6 +2596,9 @@ void blitz_build_fetch_index_node(blitz_tpl *tpl, tpl_node_struct *node, char *p
            blitz_build_fetch_index_node(tpl, node->children[j], current_path, current_path_len);
         }
     }
+
+
+
 }
 
 /**********************************************************************************************************************/
@@ -2642,8 +2660,6 @@ int blitz_fetch_node_by_path(
     tpl_node_struct *i_node = NULL;
     unsigned long result_alloc_len = 0;
     zval **z = NULL;
-
-//php_var_dump(&input_params,0);
 
     if((path[0] == '/') && (path_len == 1)) {
         return blitz_exec_template(tpl,id,result,result_len TSRMLS_CC);
@@ -3105,8 +3121,10 @@ PHP_FUNCTION(blitz_set) {
     }
 
     if(!tpl->current_iteration) {
+//php_printf("D:01\n");
         blitz_iterate_by_path(tpl, tpl->current_path, strlen(tpl->current_path), 0, 0 TSRMLS_CC);
     } else {
+//php_printf("D:021\n");
         // fix last_iteration: if we did iterate('/some') before and now set in '/', 
         // then current_iteration is not empty but last_iteration points to '/some'
         tpl->last_iteration = tpl->current_iteration;
@@ -3317,8 +3335,9 @@ PHP_FUNCTION(blitz_fetch) {
     char *key = NULL;
     int key_len = 0;
     long index = 0;
-    zval *dummy = NULL;
-    zval **path_iteration = & dummy;
+    zval *dummy1 = NULL, *dummy2 = NULL;
+    zval **path_iteration = & dummy1;
+    zval **path_iteration_parent = & dummy2;
     zval *final_params = NULL;
 
     BLITZ_FETCH_TPL_RESOURCE(id, tpl, desc);
@@ -3334,30 +3353,23 @@ PHP_FUNCTION(blitz_fetch) {
 
     // find corresponding iteration data
     res = blitz_normalize_path(&tpl->path_buf, path, path_len, tpl->current_path, current_len TSRMLS_CC);
+    current_len = strlen(tpl->current_path);
     norm_len = strlen(tpl->path_buf);
 
-    if((current_len == norm_len)
-        && (0 == strncmp(tpl->path_buf, tpl->current_path, norm_len)))
-    {
-//php_printf("D:1\n");
-        path_iteration = tpl->current_iteration;
-        path = tpl->current_path;
-        path_len = current_len;
+    // 2DO: using something like current_iteration and current_iteration_parent can speed up next step, 
+    // but for other speed-up purposes it's not guaranteed that current_iteration and current_iteration_parent 
+    // point to really current values. that's why we cannot just check tpl->current_path == tpl->path_buf and use them
+    // we always find iteration by path instead
+    res = blitz_find_iteration_by_path(tpl, tpl->path_buf, norm_len, path_iteration, path_iteration_parent);
+    if(!res) {
+        *path_iteration = NULL;
+        final_params = input_arr;
     } else {
-//php_printf("D:2\n");
-//php_printf("p = %p\n", *path_iteration);
-        res = blitz_find_iteration_by_path(tpl, tpl->path_buf, norm_len, path_iteration);
-//php_printf("p = %p, res = %d\n", *path_iteration, res);
-        if(!res) {
-            *path_iteration = NULL;
-            final_params = input_arr;
-        } else {
-            final_params = *path_iteration;
-        }
+        final_params = *path_iteration;
     }
 
     // merge data with input params
-    if(input_arr && *path_iteration) {
+    if(input_arr && path_iteration && *path_iteration) {
         input_ht = Z_ARRVAL_P(input_arr);
         zend_hash_internal_pointer_reset_ex(Z_ARRVAL_PP(path_iteration), &pointer);
         zend_hash_internal_pointer_reset_ex(input_ht, &pointer);
@@ -3391,10 +3403,17 @@ PHP_FUNCTION(blitz_fetch) {
     if(exec_status) {
         ZVAL_STRINGL(return_value,result,result_len,1);
         if(exec_status == 1) efree(result);
+        // clean-up parent path iteration after the fetch
+        if(path_iteration_parent && *path_iteration_parent) {
+            zend_hash_internal_pointer_end_ex(Z_ARRVAL_PP(path_iteration_parent), &pointer);
+            if(HASH_KEY_IS_LONG == zend_hash_get_current_key_ex(Z_ARRVAL_PP(path_iteration_parent), &key, &key_len, &index, 0, &pointer)) {
+                //tpl->last_iteration = NULL;
+                zend_hash_index_del(Z_ARRVAL_PP(path_iteration_parent),index);
+            }
+        } 
     } else {
         RETURN_FALSE;
     }
-
 
     return;
 }
