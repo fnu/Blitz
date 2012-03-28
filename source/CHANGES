@@ -1,0 +1,29 @@
+===============================================================================
+0.4.1 version
+===============================================================================
+- several context/iterate fixes (logical, very important Dick's issues)
+- added has_context function
+- removed dump_set function (dump_iterations can be used instead)
+- removed pack-features for win32 (this code needs to be rewritten)
+- OOP-style function aliases dumpStruct, dumpIterations,  hasContext, setGlobal
+- new tests added, all tests are compatible with PHP5 now 
+- ini-params renamed, they are: var_prefix, tag_open, tag_close ("tag", not "node")
+- case insensitivity for contexts added
+- non-string objects returning from user methods are converted to strings
+- my_method() is a valid call now (nothing in brackets)
+- load(NULL) segfault fixed
+- passing wrong parameters to iterate/parse (arrays are of wrong format) fixed
+- dynamical realloc in blitz_analyze (segfault on big templates fix)
+- segfaults on user method calling (method throws an exception, returned value corruption)
+- empty template is not analyzed, and no warning is shown
+- line/number border-value fixes in error messages 
+- TSRM-related & win32 compilation fixes
+- clean-up of passing arguments to user methods corrected
+
+===================================================================================================
+0.4.0 version 
+===================================================================================================
+- context-related functionality added (context, iterate, block, fetch, set_globals)
+- human-readable errors (syntax, internal etc)
+- dump functions for debugging: dump_struct, dump_set, dump_iterations
+- T-cache (packed templates)

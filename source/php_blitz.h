@@ -4,7 +4,7 @@
   +----------------------------------------------------------------------+
 */
 
-/* $Id: php_blitz.h,v 0.6 2006/09/24 16:45:59 fisher Exp $ */
+/* $Id: php_blitz.h,v 0.12 2006/11/20 06:02:21 fisher Exp $ */
 
 #ifndef PHP_BLITZ_H
 #define PHP_BLITZ_H
@@ -35,9 +35,9 @@ PHP_FUNCTION(blitz_init);
 PHP_FUNCTION(blitz_load);
 PHP_FUNCTION(blitz_set);
 PHP_FUNCTION(blitz_set_global);
-PHP_FUNCTION(blitz_dump_set);
 PHP_FUNCTION(blitz_dump_struct);
 PHP_FUNCTION(blitz_dump_iterations);
+PHP_FUNCTION(blitz_has_context);
 PHP_FUNCTION(blitz_parse);
 PHP_FUNCTION(blitz_parse_new);
 PHP_FUNCTION(blitz_include);
@@ -45,6 +45,9 @@ PHP_FUNCTION(blitz_iterate);
 PHP_FUNCTION(blitz_context);
 PHP_FUNCTION(blitz_block);
 PHP_FUNCTION(blitz_fetch);
+
+
+
 
 // class BlitzPack
 PHP_FUNCTION(blitz_pack_init);
@@ -85,8 +88,8 @@ ZEND_END_MODULE_GLOBALS(blitz)
 #define BLITZ_MAX_LEXEM_LEN    			1024
 #define BLITZ_INPUT_BUF_SIZE 	   		512 
 #define BLITZ_ALLOC_TAGS_STEP   		16
-#define BLITZ_CALL_ALLOC_ARG_INIT		2
-
+#define BLITZ_CALL_ALLOC_ARG_INIT		4
+#define BLITZ_NODE_ALLOC_CHILDREN_INIT		4
 
 #define BLITZ_NODE_TYPE_PREDEF_MASK		28
 #define BLITZ_IS_PREDEF_METHOD(type)	(type & BLITZ_NODE_TYPE_PREDEF_MASK)
@@ -129,6 +132,7 @@ typedef struct _tpl_node_struct {
     unsigned char n_args;
     struct _tpl_node_struct **children; 
     unsigned int n_children;
+    unsigned int n_children_alloc;
     unsigned int pos_in_list;
 } tpl_node_struct;
 
@@ -138,6 +142,7 @@ typedef struct {
     char *close_node;
     unsigned int l_open_node;
     unsigned int l_close_node;
+    char var_prefix;
 } tpl_config_struct;
 
 // template pack (parsed cache)
@@ -165,7 +170,8 @@ typedef struct _blitz_tpl {
     HashTable *hash_globals;
     zval *iterations;
     zval **current_iteration;  // current iteraion values
-    zval **current_iteration_node; // list of current context iterations (current_iteration is last element in this list)
+    zval **last_iteration;     // latest iteration - used in combined iterate+set methods 
+    zval **current_iteration_parent; // list of current context iterations (current_iteration is last element in this list)
     char *current_path;
     char *path_buf;
     HashTable *fetch_index; // path -> node number, used for fetch operations only, is not built by default
@@ -224,7 +230,7 @@ typedef struct _blitz_tpl {
         } else {                                                               \
             *(p) = *(c);                                                       \
             ++(p);                                                             \
-            ++(len);							                               \
+            ++(len);							       \
             if (was_escaped) was_escaped = 0;                                  \
         }                                                                      \
         (c)++;                                                                 \
@@ -244,7 +250,7 @@ typedef struct _blitz_tpl {
         } else {                                                               \
             *(p) = *(c);                                                       \
             ++(p);                                                             \
-            ++(len);							                               \
+            ++(len);                                                           \
             if (was_escaped) was_escaped = 0;                                  \
         }                                                                      \
         ++(c);                                                                 \
@@ -291,7 +297,7 @@ typedef struct _blitz_tpl {
 #define BLITZ_ARG_NOT_EMPTY(a,ht,res)                                                             \
     if((a).type & BLITZ_ARG_TYPE_STR) {                                                           \
         (res) = ((a).len>0) ? 1 : 0;                                                              \
-    } else if ((a).type & BLITZ_ARG_TYPE_NUM) {												      \
+    } else if ((a).type & BLITZ_ARG_TYPE_NUM) {                                                   \
         (res) = (0 == strncmp((a).name,"0",1)) ? 0 : 1;                                           \
     } else if (((a).type & BLITZ_ARG_TYPE_VAR) && ht) {                                           \
         zval **z;                                                                                 \
@@ -319,14 +325,32 @@ typedef struct _blitz_tpl {
 // well, we cannot set non-scalar template value, but if ever...
 // case IS_ARRAY: res = (0 == zend_hash_num_elements(Z_ARRVAL_PP(z))) ? 0 : 1;
 
-#define BLITZ_REALLOC_RESULT(blen,nlen,rlen,alen,res,pres)										  \
-    (nlen) = (rlen) + (blen);												                      \
+#define BLITZ_REALLOC_RESULT(blen,nlen,rlen,alen,res,pres)                                        \
+    (nlen) = (rlen) + (blen);                                                                     \
     if ((rlen) < (nlen)) {                                                                        \
         while ((alen) < (nlen)) {                                                                 \
             (alen) <<= 1;                                                                         \
         }                                                                                         \
-        (res) = (unsigned char*)erealloc((res),(alen)*sizeof(unsigned char));                                     \
+        (res) = (unsigned char*)erealloc((res),(alen)*sizeof(unsigned char));                     \
         (pres) = (res) + (rlen);                                                                  \
-    } 																		                      \
+    }                                                                                             \
+
+#define BLITZ_FETCH_TPL_RESOURCE(id,tpl,desc)                                                     \
+    if (((id) = getThis()) == 0) {                                                                \
+        WRONG_PARAM_COUNT;                                                                        \
+        RETURN_FALSE;                                                                             \
+    }                                                                                             \
+                                                                                                  \
+    if (zend_hash_find(Z_OBJPROP_P((id)), "tpl", sizeof("tpl"), (void **)&(desc)) == FAILURE) {   \
+        php_error_docref(NULL TSRMLS_CC, E_WARNING,                                               \
+            "INTERNAL:cannot find template descriptor (object->tpl resource)"                     \
+        );                                                                                        \
+        RETURN_FALSE;                                                                             \
+    }                                                                                             \
+                                                                                                  \
+    ZEND_FETCH_RESOURCE(tpl, blitz_tpl *, desc, -1, "blitz template", le_blitz);                  \
+    if(!tpl) {                                                                                    \
+        RETURN_FALSE;                                                                             \
+    }
 
 #endif	/* PHP_BLITZ_H */

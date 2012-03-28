@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><title>include</title><link rel="stylesheet" href="html.css" type="text/css" /><meta name="generator" content="DocBook XSL Stylesheets V1.71.1" /><link rel="start" href="index.html" title="Blitz Templates" /><link rel="up" href="methods.template.html" title="Шаблон" /><link rel="prev" href="methods.template.if.html" title="if" /><link rel="part" href="introduction.html" title="Часть I. Введение" /><link rel="chapter" href="introduction.why.html" title="Глава 1. Зачем еще один парсер шаблонов?" /><link rel="chapter" href="introduction.test_performance.html" title="Глава 2. Некоторые результаты тестов производительности" /><link rel="part" href="install_config.html" title="Часть II. Установка и настройка" /><link rel="chapter" href="install_config.install.html" title="Глава 3. Установка" /><link rel="reference" href="install_config.config.html" title="Настройка" /><link rel="refentry" href="install_config.config.tag_open.html" title="blitz.tag_open" /><link rel="refentry" href="install_config.config.tag_close.html" title="blitz.tag_close" /><link rel="refentry" href="install_config.config.var_prefix.html" title="blitz.var_prefix" /><link rel="part" href="language_reference.html" title="Часть III. Справочник языка" /><link rel="chapter" href="language_reference.basic_syntax.html" title="Глава 4. Основы синтаксиса" /><link rel="chapter" href="language_reference.variables.html" title="Глава 5. Переменные" /><link rel="chapter" href="language_reference.user_methods.html" title="Глава 6. Пользовательские методы" /><link rel="chapter" href="language_reference.contexts.html" title="Глава 7. Контексты" /><link rel="part" href="methods.html" title="Часть IV. Методы" /><link rel="reference" href="methods.controller.html" title="Контроллер" /><link rel="refentry" href="methods.controller.block.html" title="block" /><link rel="refentry" href="methods.controller.context.html" title="context" /><link rel="refentry" href="methods.controller.dump_iterations.html" title="dump_iterations" /><link rel="refentry" href="methods.controller.dump_struct.html" title="dump_struct" /><link rel="refentry" href="methods.controller.fetch.html" title="fetch" /><link rel="refentry" href="methods.controller.has_context.html" title="has_context" /><link rel="refentry" href="methods.controller.iterate.html" title="iterate" /><link rel="refentry" href="methods.controller.load.html" title="load" /><link rel="refentry" href="methods.controller.parse.html" title="parse" /><link rel="refentry" href="methods.controller.set.html" title="set" /><link rel="refentry" href="methods.controller.set_global.html" title="set_global" /><link rel="reference" href="methods.template.html" title="Шаблон" /><link rel="refentry" href="methods.template.if.html" title="if" /><link rel="refentry" href="methods.template.include.html" title="include" /><link rel="section" href="methods.template.include.html#id3498375" title="" /></head><body><div class="navheader"><table width="100%" summary="Navigation header"><tr><th colspan="3" align="center">include</th></tr><tr><td width="20%" align="left"><a accesskey="p" href="methods.template.if.html">Пред.</a> </td><th width="60%" align="center">Шаблон</th><td width="20%" align="right"> </td></tr></table><hr /></div><div class="refentry" lang="ru" xml:lang="ru"><a id="methods.template.include"></a><div class="titlepage"></div>
+	<div class="refnamediv"><h2>include</h2><p>
+		<p xmlns="">(blitz &gt;= 0.1)</p>
+		include
+		 — подключить шаблон
+	</p></div>
+	<div class="refsection" lang="ru" xml:lang="ru"><a id="id3498375"></a>
+		<h2></h2>
+		<div xmlns="" class="methodsynopsis">
+			string 
+			<strong class="methodname">include</strong>
+			 ( 
+				string 
+				tpl
+			 )
+		</div>
+	
+		<div class="example"><a id="methods.template.include.example.include"></a><p class="title"><b>Пример 21. include</b></p><div class="example-contents">
+			
+		<p><code class="filename">1.tpl</code></p><pre class="programlisting">Мама {{ include('other.tpl') }} раму</pre><p><code class="filename">2.tpl</code></p><pre class="programlisting">мыла</pre><pre class="programlisting">&lt;?
+
+$T = new Blitz('tpl');
+echo $T-&gt;parse();
+echo "\n";
+
+?&gt;</pre><pre class="screen">Мама мыла раму</pre></div></div><br class="example-break" />
+		<p>Если вы включаете один шаблон в другой, то включаемый шаблон наследует все переменные внешнего шаблона.</p>
+		<div class="example"><a id="methods.template.include.example.include_extends_vars"></a><p class="title"><b>Пример 22. include: наследование всех переменных внешнего шаблона</b></p><div class="example-contents">
+			
+		<p><code class="filename">1.tpl</code></p><pre class="programlisting">переменная a = {{ $a }}
+внутренний шаблон: {{ include('other.tpl') }}
+переменная b = {{ $b }}</pre><p><code class="filename">2.tpl</code></p><pre class="programlisting">/* переменная a = {{ $a }}, переменная b = {{ $b }} */</pre><pre class="programlisting">&lt;?
+
+$T = new Blitz('tpl');
+$T-&gt;set(array('a' =&gt; 'a_value', 'b' =&gt; 'b_value'));
+echo $T-&gt;parse();
+echo "\n";
+
+?&gt;</pre><pre class="screen">переменная a = a_value
+внутренний шаблон: /* переменная a = a_value, переменная b = b_value */
+переменная b = b_value</pre></div></div><br class="example-break" />
+		<div class="example"><a id="methods.template.include.example.include_better_extend"></a><p class="title"><b>Пример 23. Иcпользование встроенного метода include лучше создания наследников Blitz лишь ради include</b></p><div class="example-contents">
+			
+		<p><code class="filename">1.tpl</code></p><pre class="programlisting">parent value: {{ $parent_val }}
+child_value: {{ $child_val }}
+===========================================================
+{{ test_include }}
+===========================================================
+parent value: {{ $parent_val }}
+child_value: {{ $child_val }}</pre><p><code class="filename">2.tpl</code></p><pre class="programlisting">parent method: {{ my_test }}
+child value: {{ $child_val }}
+parent value: {{ $parent_val }}</pre><pre class="programlisting">&lt;?
+
+class BlitzTemplate extends Blitz {
+    var $titem;
+
+    function BlitzTemplate($t,$titem) {
+        parent::Blitz($t);
+        $this-&gt;set(array('parent_val' =&gt; 'some_parent_val'));
+        $this-&gt;titem = $titem;
+    }
+
+    function my_test() {
+        return 'user method called ('.__CLASS__.','.__LINE__.')';
+    }
+
+    function test_include() {
+        $result = '';
+        while($i++&lt;3) {
+            $result .= $this-&gt;include($this-&gt;titem,array(
+                'child_val' =&gt; 'i_'.$i
+            ));
+        }
+        return $result;
+    }
+
+}
+
+$T = new BlitzTemplate('tpl','other.tpl');
+echo $T-&gt;parse();
+
+?&gt;</pre><pre class="screen">parent value: some_parent_val
+child_value:
+===========================================================
+parent method: user method called (blitztemplate,13)
+child value: i_1
+parent value: some_parent_val
+parent method: user method called (blitztemplate,13)
+child value: i_2
+parent value: some_parent_val
+parent method: user method called (blitztemplate,13)
+child value: i_3
+parent value: some_parent_val
+
+===========================================================
+parent value: some_parent_val
+child_value: i_3</pre></div></div><br class="example-break" />
+		<p>При первой обработке шаблона структура всех его тэгов сохраняется, поэтому при последующих вызовах шаблон снова не анализируется. Обратите внимание на то, что до выполнения метода test_include переменная child_value пуста и не «видна» в шаблоне, но после выполнения видна и содержит последнее установленное значение. Это поведение аналогично тому, что происходит при выполнении php-кода, если бы вместо test_include у нас был include некоторого php-файла, внутри которого бы инициализировалась новая переменная. Внутри внешнего кода до include она имела бы неопределенное значение, но после - уже нет. На самом деле при вызове include сначала все параметры вызова include добавляются к уже установленным параметрам шаблона, и уже после этого происходит выполнение кода, поэтому ничего удивительного в таком поведении нет. Эту особенность следует иметь в виду, чтобы случайно не «затереть» ранее установленную переменную.</p>
+	</div>
+</div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="methods.template.if.html">Пред.</a> </td><td width="20%" align="center"><a accesskey="u" href="methods.template.html">Уровень выше</a></td><td width="40%" align="right"> </td></tr><tr><td width="40%" align="left" valign="top">if </td><td width="20%" align="center"><a accesskey="h" href="index.html">Начало</a></td><td width="40%" align="right" valign="top"> </td></tr></table></div></body></html>

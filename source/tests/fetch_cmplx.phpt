@@ -45,7 +45,7 @@ A-begin(1)  B-begin; y=y_value#1 B-end ; x=x_value#1, y= A-end
 
 FETCH: /root/a
 
-A-begin(2)  ; x=x_value#2, y= A-end
+A-begin(2)  B-begin; y=y_value#1 B-end ; x=x_value#2, y= A-end
 
 FETCH: /root/a
 
@@ -53,7 +53,7 @@ A-begin(3)  B-begin; y=y_value#3 B-end ; x=x_value#3, y= A-end
 
 FETCH: /root/a
 
-A-begin(4)  ; x=x_value#4, y= A-end
+A-begin(4)  B-begin; y=y_value#3 B-end ; x=x_value#4, y= A-end
 
 FETCH: /root/a
 
@@ -61,7 +61,7 @@ A-begin(5)  B-begin; y=y_value#5 B-end ; x=x_value#5, y= A-end
 
 FETCH: /root/a
 
-A-begin(6)  ; x=x_value#6, y= A-end
+A-begin(6)  B-begin; y=y_value#5 B-end ; x=x_value#6, y= A-end
 
 FETCH: /root/a
 
@@ -69,7 +69,7 @@ A-begin(7)  B-begin; y=y_value#7 B-end ; x=x_value#7, y= A-end
 
 FETCH: /root/a
 
-A-begin(8)  ; x=x_value#8, y= A-end
+A-begin(8)  B-begin; y=y_value#7 B-end ; x=x_value#8, y= A-end
 
 FETCH: /root/a
 
@@ -85,14 +85,6 @@ FETCH: /root
 
 this is root
 
-A-begin(1)  B-begin; y=y_value#1 B-end ; x=x_value#1, y=y_global A-end
-
-A-begin(3)  B-begin; y=y_value#3 B-end ; x=x_value#3, y=y_global A-end
-
-A-begin(5)  B-begin; y=y_value#5 B-end ; x=x_value#5, y=y_global A-end
-
-A-begin(7)  B-begin; y=y_value#7 B-end ; x=x_value#7, y=y_global A-end
-
 A-begin(9)  B-begin; y=y_value#9 B-end ; x=x_value#9, y=y_global A-end
 
 end of root
@@ -101,14 +93,6 @@ FETCH: /
 complex fetch example
 
 this is root
-
-A-begin(1)  B-begin; y=y_value#1 B-end ; x=x_value#1, y=y_global A-end
-
-A-begin(3)  B-begin; y=y_value#3 B-end ; x=x_value#3, y=y_global A-end
-
-A-begin(5)  B-begin; y=y_value#5 B-end ; x=x_value#5, y=y_global A-end
-
-A-begin(7)  B-begin; y=y_value#7 B-end ; x=x_value#7, y=y_global A-end
 
 A-begin(9)  B-begin; y=y_value#9 B-end ; x=x_value#9, y=y_global A-end
 

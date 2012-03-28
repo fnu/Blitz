@@ -1,1 +1,1 @@
-calling template with arguments: {{ my_test(134,$x,"hello,world!",$dummy) }}
+calling template with arguments: {{ my_test(134,$x,"hello,world!",$dummy,$y) }}
